@@ -15,6 +15,7 @@ def count_chunk(input_path:str, start:int, end:int, special_tokens:list[str]) ->
         f.seek(start)
         chunk_bytes = f.read(end - start)
         chunk_text = chunk_bytes.decode('utf-8',errors="ignore")
+        del chunk_bytes  
         chunks = split_on_specials(chunk_text, special_tokens)
         for chunk in chunks:
             if chunk in special_tokens: continue
@@ -47,7 +48,7 @@ def train_bpe(input_path:str,vocab_size:int,special_tokens:list[str]) -> tuple[d
     else:
         num_processes = min(os.cpu_count(), 8)
         with open(input_path, "rb") as f:
-            boundaries = find_chunk_boundaries(f, num_processes, max(special_tokens, key=len).encode('utf-8'))
+            boundaries = find_chunk_boundaries(f, num_processes*4, max(special_tokens, key=len).encode('utf-8'))
             args = [(input_path, start, end, special_tokens) for start, end in zip(boundaries[:-1], boundaries[1:])]
             with multiprocessing.Pool(num_processes) as pool:
                 word_counts = sum(pool.starmap(count_chunk, args), collections.Counter())
@@ -310,14 +311,19 @@ if __name__ == "__main__":
     # find_chunk_boundaries(open("/home/user/learn/assignment1-basics/tests/fixtures/tinystories_sample.txt", "rb"), 4, b"<|endoftext|>")
     # print(count_chunk("tests/fixtures/tinystories_sample.txt", 0, 1000, ["<endoftext>"]))
 
-    path = "tests/fixtures/tinystories_sample.txt"
-    specials = ["<endoftext>"]     # 注意：从测试文件复制，别手打管道符！
-    size = os.path.getsize(path)
+    # path = "tests/fixtures/tinystories_sample.txt"
+    # specials = ["<endoftext>"]     # 注意：从测试文件复制，别手打管道符！
+    # size = os.path.getsize(path)
 
-    full = count_chunk(path, 0, size, specials)          # 整块读
-    with open(path, "rb") as f:
-        bounds = find_chunk_boundaries(f, 3, max(specials, key=len).encode("utf-8"))
-    merged = sum((count_chunk(path, s, e, specials) for s, e in zip(bounds[:-1], bounds[1:])),
-                collections.Counter())
-    assert merged == full, "切块有重或有漏！"
-    print("切块不变式通过, 块数:", len(bounds) - 1)
+    # full = count_chunk(path, 0, size, specials)          # 整块读
+    # with open(path, "rb") as f:
+    #     bounds = find_chunk_boundaries(f, 3, max(specials, key=len).encode("utf-8"))
+    # merged = sum((count_chunk(path, s, e, specials) for s, e in zip(bounds[:-1], bounds[1:])),
+    #             collections.Counter())
+    # assert merged == full, "切块有重或有漏！"
+    # print("切块不变式通过, 块数:", len(bounds) - 1)
+
+    chr(0)
+    print(chr(0))
+    "this is a test" + chr(0) + "string"
+    print("this is a test" + chr(0) + "string")
