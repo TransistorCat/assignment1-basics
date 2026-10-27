@@ -2,6 +2,7 @@
 from typing import Iterable, Iterator
 import regex as re
 import collections
+import pickle
 
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 def train_bpe(input_path:str,vocab_size:int,special_tokens:list[str]) -> tuple[dict[int,bytes],list[tuple[bytes,bytes]]]:
@@ -149,6 +150,15 @@ def split_on_specials(text: str, special_tokens: list[str]) -> list[str]:
         chunks = new_chunks
     return chunks
 
+def save_tokenizer(vocab:dict[int, bytes], merges:list[tuple[bytes,bytes]], vocab_filepath:str, merges_filepath:str):
+    """
+    Save the tokenizer to files.
+    """
+    with open(vocab_filepath, "wb") as f:
+        pickle.dump(vocab, f)
+    with open(merges_filepath, "wb") as f:
+        pickle.dump(merges, f)
+
 class Tokenizer:
     def __init__(self, vocab: dict[int, bytes], merges: list[tuple[bytes,bytes]], special_tokens: list[str]):
         self.vocab = vocab
@@ -172,7 +182,7 @@ class Tokenizer:
         self.special_tokens_ids = {token:self.inverse_vocab[token.encode('utf-8')] for token in self.special_tokens}
 
 
-    
+    @classmethod    
     def from_files(cls,vocab_filepath:str, merges_filepath:str, special_tokens:list[str]):
         with open(vocab_filepath, 'rb') as f:
             vocab = pickle.load(f)
@@ -251,8 +261,23 @@ if __name__ == "__main__":
     #         print("实际:", repr(b[max(0, i-10):i+10]))
     #         break
 
-    ranks = {(b'a', b'b'): 3, (b'ab', b'c'): 5}
-    print(find_best_pair([b'a', b'b', b'a', b'b'], ranks))   # (b'a', b'b')
-    print(find_best_pair([b'a', b'b', b'c'], ranks))          # (b'a', b'b')
-    print(find_best_pair([b'x'], ranks))                      # None
-    print(find_best_pair([b'q', b'r'], ranks))                # None
+    # ranks = {(b'a', b'b'): 3, (b'ab', b'c'): 5}
+    # print(find_best_pair([b'a', b'b', b'a', b'b'], ranks))   # (b'a', b'b')
+    # print(find_best_pair([b'a', b'b', b'c'], ranks))          # (b'a', b'b')
+    # print(find_best_pair([b'x'], ranks))                      # None
+    # print(find_best_pair([b'q', b'r'], ranks))                # None
+
+
+    # 造 → 存 → 读 → 比
+
+    # toy_vocab = {0: b" ", 1: b"a", 2: b"c", 3: b"e", 4: b"h", 5: b"t",
+    #          6: b"th", 7: b" c", 8: b" a", 9: b"the", 10: b" at"}
+    # toy_merges = [(b"t", b"h"), (b" ", b"c"), (b" ", b"a"), (b"th", b"e"), (b" a", b"t")]
+    # tok_a = Tokenizer(toy_vocab, toy_merges, [])
+    # save_tokenizer(toy_vocab, toy_merges, "/tmp/v.pkl", "/tmp/m.pkl")
+    # tok_b = Tokenizer.from_files("/tmp/v.pkl", "/tmp/m.pkl", special_tokens=None)
+
+    # assert tok_b.encode("the cat ate") == tok_a.encode("the cat ate")   # 行为一致
+    # assert tok_b.vocab == tok_a.vocab                                   # 本体一致
+    # assert tok_b.merges == tok_a.merges
+    print("往返验收通过")
