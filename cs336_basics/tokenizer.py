@@ -1,8 +1,9 @@
 
+from typing import Iterable, Iterator
 import regex as re
 import collections
 
-
+PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 def train_bpe(input_path:str,vocab_size:int,special_tokens:list[str]) -> tuple[dict[int,bytes],list[tuple[bytes,bytes]]]:
     """
     Train a BPE tokenizer on the input text.
@@ -22,10 +23,11 @@ def train_bpe(input_path:str,vocab_size:int,special_tokens:list[str]) -> tuple[d
             for j in i.split(special_token):
                 new_chunks.append(j)
         chunks = new_chunks
-
-    PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+    chunks = split_on_specials(raw, special_tokens)
     word_counts = collections.Counter()
     for chunk in chunks:
+        if chunk in special_tokens:
+            continue
         tokens = re.findall(PAT, chunk)
         word_counts.update(tokens)
     words: dict[bytes, tuple[int, list[int]]] = {}
@@ -108,12 +110,131 @@ def merge_word_pair(ids: list[int], pair: tuple[int, int],new_pair_id: int) -> l
             i += 1
     return new_ids
 
+def apply_merge(pieces:list[bytes], pair:tuple[bytes,bytes]) -> list[bytes]:
+    new_pieces = []
+    i = 0
+    while i < len(pieces):
+        if i < len(pieces) - 1 and pieces[i] == pair[0] and pieces[i + 1] == pair[1]:
+            new_pieces.append(pair[0] + pair[1])
+            i += 2
+        else:
+            new_pieces.append(pieces[i])
+            i += 1
+    return new_pieces
+def split_on_specials(text: str, special_tokens: list[str]) -> list[str]:
+    """
+    Split the text on special tokens.
+    """
+
+    chunks=[text]
+    for special_token in sorted(special_tokens, key=len, reverse=True):
+        new_chunks = []
+        for i in chunks:
+            if i in special_tokens:
+                new_chunks.append(i)
+                continue
+            for j in  re.split("("+re.escape(special_token)+")", i):
+                new_chunks.append(j)
+        chunks = new_chunks
+    return chunks
+
+class Tokenizer:
+    def __init__(self, vocab: dict[int, bytes], merges: list[tuple[bytes,bytes]], special_tokens: list[str]):
+        self.vocab = vocab
+        self.merges = merges
+        self.special_tokens = special_tokens
+        # self.vocab.update({len(vocab) + i: token.encode('utf-8') for i, token in enumerate(special_tokens)})
+        if self.special_tokens is None:
+            self.special_tokens = []
+        
+        if "" in self.special_tokens:
+            raise ValueError("'' is a special token")
+        
+        for token in self.special_tokens:
+            bytes_token = token.encode('utf-8')
+            if bytes_token not in self.vocab.values():
+                self.vocab[len(self.vocab)] = bytes_token
+
+
+        self.inverse_vocab= {v: k for k, v in self.vocab.items()}
+        self.special_tokens_ids = {token:self.inverse_vocab[token.encode('utf-8')] for token in self.special_tokens}
+
+
+    
+    def from_files(cls,vocab_filepath:str, merges_filepath:str, special_tokens:list[str]):
+        with open(vocab_filepath, 'rb') as f:
+            vocab = pickle.load(f)
+        with open(merges_filepath, 'rb') as f:
+            merges = pickle.load(f)
+        return cls(vocab, merges, special_tokens)
+
+
+    def encode(self, text: str) -> list[int]:
+        ids = []
+        chunks = split_on_specials(text, self.special_tokens)
+        for chunk in chunks:
+            if chunk in self.special_tokens:
+                ids.append(self.special_tokens_ids[chunk])
+                continue
+            words = re.findall(PAT, chunk)
+            for word in words:
+                pieces = [bytes([byte]) for byte in word.encode('utf-8')]
+                for pair in self.merges:
+                    pieces = apply_merge(pieces, pair)
+                ids.extend(self.inverse_vocab[piece] for piece in pieces)
+        return ids
+
+
+    def encode_iterable(self, iterable: Iterable[str]) -> Iterator[int]:
+        for text in iterable:
+            yield from self.encode(text)
+    def decode(self, tokens: list[int]) -> str:
+        text = []
+        for token in tokens:
+            text.append(self.vocab[token])
+        bytes_text = b''.join(text)
+        return bytes_text.decode('utf-8',errors="replace")
+
 
 if __name__ == "__main__":
-    vocab, merges = train_bpe("/home/user/learn/assignment1-basics/tests/fixtures/tinystories_sample.txt", 400, ["<|endoftext|>"])
-    print(vocab)
-    print(merges)
-
+    # vocab, merges = train_bpe("/home/user/learn/assignment1-basics/tests/fixtures/tinystories_sample.txt", 400, ["<|endoftext|>"])
+    # print(vocab)
+    # print(merges)
+    # print(re.escape("<eot>"))                                    # ① 疫苗长什么样
+    # print("(" + re.escape("<eot>") + ")")                        # ② 最终模式字符串
+    # print(re.split(re.escape("<eot>"), "hi<eot>yo")) # ③ 用它切分文本
+    # print(split_on_specials("hi<eot>yo", ["<eot>"]))
+    # tok = Tokenizer({0: b"a", 1: b"b"}, [], ["<eot>"])
+    # print(tok.encode("a b"))
+    # print(apply_merge([b'a', b'b', b'a', b'b'], (b'a', b'b')))   # [b'ab', b'ab']
+    # print(apply_merge([b'a', b'b', b'c'], (b'b', b'c')))          # [b'a', b'bc']
+    # print(apply_merge([b'x'], (b'a', b'b')))                      # [b'x']
     # merge_word_pair([1, 2, 3, 4, 5], (2, 3), 6)
     # print(merge_word_pair([1, 3, 4], (1, 2), 99))   # 期望 [1, 3, 4]
     # print(merge_word_pair([116], (1, 2), 99))        # 期望 [116]（单元素词，fixture 里真实存在）
+    vocab = {0: b" ", 1: b"a", 2: b"c", 3: b"e", 4: b"h", 5: b"t",
+         6: b"th", 7: b" c", 8: b" a", 9: b"the", 10: b" at"}
+    merges = [(b"t", b"h"), (b" ", b"c"), (b" ", b"a"), (b"th", b"e"), (b" a", b"t")]
+    tok = Tokenizer(vocab, merges, ["<|endoftext|>", "<|endoftext|><|endoftext|>"])
+    print(tok.encode("the cat ate"))  
+
+    # text = "the cat ate the cat ate"
+    # tok = Tokenizer({0: b" ", 1: b"a", 2: b"c", 3: b"e", 4: b"h", 5: b"t",
+    #      6: b"th", 7: b" c", 8: b" a", 9: b"the", 10: b" at"}, [(b"t", b"h"), (b" ", b"c"), (b" ", b"a"), (b"th", b"e"), (b" a", b"t")], [])
+    # print(list(tok.encode_iterable(["the cat", " ate", " the cat ate"])))
+    # print(tok.encode(text))
+
+    from tests.test_tokenizer import VOCAB_PATH, MERGES_PATH, get_tokenizer_from_vocab_merges_path
+
+    tok = get_tokenizer_from_vocab_merges_path(VOCAB_PATH, MERGES_PATH, special_tokens=["<|endoftext|>"])
+
+    test_string = "Héllò hôw <|endoftext|><|endoftext|> are ü? 🙃<|endoftext|>"
+    b = tok.decode(tok.encode(test_string))
+
+    print(len(test_string), len(b))                     # 长度差 = 丢了/多了几个字符
+    for i, (x, y) in enumerate(zip(test_string, b)):
+        if x != y:
+            print("第一个分歧点在索引", i)
+            print("期望:", repr(test_string[max(0, i-10):i+10]))    # 分歧点上下文各 10 字符
+            print("实际:", repr(b[max(0, i-10):i+10]))
+            break
