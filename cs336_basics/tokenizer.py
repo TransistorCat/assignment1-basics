@@ -121,6 +121,17 @@ def apply_merge(pieces:list[bytes], pair:tuple[bytes,bytes]) -> list[bytes]:
             new_pieces.append(pieces[i])
             i += 1
     return new_pieces
+
+def find_best_pair(pieces:list[bytes], merge_ranks:dict[tuple[bytes,bytes], int]) -> tuple[bytes,bytes] | None:
+    best_pair = None
+    best_rank = float('inf')
+    for pair in get_pairs(pieces):
+        rank = merge_ranks.get(pair, float('inf'))
+        if rank < best_rank:
+            best_rank = rank
+            best_pair = pair
+    return best_pair
+
 def split_on_specials(text: str, special_tokens: list[str]) -> list[str]:
     """
     Split the text on special tokens.
@@ -142,6 +153,7 @@ class Tokenizer:
     def __init__(self, vocab: dict[int, bytes], merges: list[tuple[bytes,bytes]], special_tokens: list[str]):
         self.vocab = vocab
         self.merges = merges
+        self.merge_ranks = {pair: rank for rank, pair in enumerate(merges)}
         self.special_tokens = special_tokens
         # self.vocab.update({len(vocab) + i: token.encode('utf-8') for i, token in enumerate(special_tokens)})
         if self.special_tokens is None:
@@ -179,8 +191,8 @@ class Tokenizer:
             words = re.findall(PAT, chunk)
             for word in words:
                 pieces = [bytes([byte]) for byte in word.encode('utf-8')]
-                for pair in self.merges:
-                    pieces = apply_merge(pieces, pair)
+                while best_pair := find_best_pair(pieces, self.merge_ranks):
+                    pieces = apply_merge(pieces, best_pair)
                 ids.extend(self.inverse_vocab[piece] for piece in pieces)
         return ids
 
@@ -212,11 +224,11 @@ if __name__ == "__main__":
     # merge_word_pair([1, 2, 3, 4, 5], (2, 3), 6)
     # print(merge_word_pair([1, 3, 4], (1, 2), 99))   # 期望 [1, 3, 4]
     # print(merge_word_pair([116], (1, 2), 99))        # 期望 [116]（单元素词，fixture 里真实存在）
-    vocab = {0: b" ", 1: b"a", 2: b"c", 3: b"e", 4: b"h", 5: b"t",
-         6: b"th", 7: b" c", 8: b" a", 9: b"the", 10: b" at"}
-    merges = [(b"t", b"h"), (b" ", b"c"), (b" ", b"a"), (b"th", b"e"), (b" a", b"t")]
-    tok = Tokenizer(vocab, merges, ["<|endoftext|>", "<|endoftext|><|endoftext|>"])
-    print(tok.encode("the cat ate"))  
+    # vocab = {0: b" ", 1: b"a", 2: b"c", 3: b"e", 4: b"h", 5: b"t",
+    #      6: b"th", 7: b" c", 8: b" a", 9: b"the", 10: b" at"}
+    # merges = [(b"t", b"h"), (b" ", b"c"), (b" ", b"a"), (b"th", b"e"), (b" a", b"t")]
+    # tok = Tokenizer(vocab, merges, ["<|endoftext|>", "<|endoftext|><|endoftext|>"])
+    # print(tok.encode("the cat ate"))  
 
     # text = "the cat ate the cat ate"
     # tok = Tokenizer({0: b" ", 1: b"a", 2: b"c", 3: b"e", 4: b"h", 5: b"t",
@@ -224,17 +236,23 @@ if __name__ == "__main__":
     # print(list(tok.encode_iterable(["the cat", " ate", " the cat ate"])))
     # print(tok.encode(text))
 
-    from tests.test_tokenizer import VOCAB_PATH, MERGES_PATH, get_tokenizer_from_vocab_merges_path
+    # from tests.test_tokenizer import VOCAB_PATH, MERGES_PATH, get_tokenizer_from_vocab_merges_path
 
-    tok = get_tokenizer_from_vocab_merges_path(VOCAB_PATH, MERGES_PATH, special_tokens=["<|endoftext|>"])
+    # tok = get_tokenizer_from_vocab_merges_path(VOCAB_PATH, MERGES_PATH, special_tokens=["<|endoftext|>"])
 
-    test_string = "Héllò hôw <|endoftext|><|endoftext|> are ü? 🙃<|endoftext|>"
-    b = tok.decode(tok.encode(test_string))
+    # test_string = "Héllò hôw <|endoftext|><|endoftext|> are ü? 🙃<|endoftext|>"
+    # b = tok.decode(tok.encode(test_string))
 
-    print(len(test_string), len(b))                     # 长度差 = 丢了/多了几个字符
-    for i, (x, y) in enumerate(zip(test_string, b)):
-        if x != y:
-            print("第一个分歧点在索引", i)
-            print("期望:", repr(test_string[max(0, i-10):i+10]))    # 分歧点上下文各 10 字符
-            print("实际:", repr(b[max(0, i-10):i+10]))
-            break
+    # print(len(test_string), len(b))                     # 长度差 = 丢了/多了几个字符
+    # for i, (x, y) in enumerate(zip(test_string, b)):
+    #     if x != y:
+    #         print("第一个分歧点在索引", i)
+    #         print("期望:", repr(test_string[max(0, i-10):i+10]))    # 分歧点上下文各 10 字符
+    #         print("实际:", repr(b[max(0, i-10):i+10]))
+    #         break
+
+    ranks = {(b'a', b'b'): 3, (b'ab', b'c'): 5}
+    print(find_best_pair([b'a', b'b', b'a', b'b'], ranks))   # (b'a', b'b')
+    print(find_best_pair([b'a', b'b', b'c'], ranks))          # (b'a', b'b')
+    print(find_best_pair([b'x'], ranks))                      # None
+    print(find_best_pair([b'q', b'r'], ranks))                # None
