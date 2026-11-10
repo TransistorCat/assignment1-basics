@@ -59,7 +59,7 @@ def scaled_dot_product_attention(
 
 
 class MultiHeadSelfAttention(nn.Module):
-    def __init__(self, d_model: int, num_heads: int, max_seq_len: int, rope_theta: float) -> None:
+    def __init__(self, d_model: int, num_heads: int, max_seq_len: int = None, rope_theta: float = None) -> None:
         super().__init__()
         '''
         d_model: int  Transformer 块输入维度
@@ -75,7 +75,12 @@ class MultiHeadSelfAttention(nn.Module):
         # 定义线性层
         self.qkv_proj = Linear(d_model, 3 * d_model) # (batch_size, seq_len, d_model) -> (batch_size, seq_len, 3 * d_model)
         self.out_proj = Linear(d_model, d_model)
-        self.rope = RotaryPositionalEmbedding(rope_theta, d_model // num_heads, max_seq_len)
+        if rope_theta is not None and max_seq_len is None:
+            assert False, "If rope_theta is provided, max_seq_len must also be provided"
+        if rope_theta is None and max_seq_len is not None:
+            assert False, "If max_seq_len is provided, rope_theta must also be provided"
+        if rope_theta is not None and max_seq_len is not None:
+            self.rope = RotaryPositionalEmbedding(rope_theta, d_model // num_heads, max_seq_len)
 
 
     def forward(self, x: torch.Tensor, token_positions: torch.Tensor = None) -> torch.Tensor:
@@ -94,8 +99,13 @@ class MultiHeadSelfAttention(nn.Module):
         # 计算 RoPE
         if token_positions is None:
             token_positions = torch.arange(x.size(1), device=x.device).unsqueeze(0).expand(x.size(0), -1)  # (batch_size, seq_len)
-        rope_q = self.rope(range_q, token_positions)
-        rope_k = self.rope(range_k, token_positions)
+        
+        if hasattr(self, 'rope'):
+            rope_q = self.rope(range_q, token_positions)
+            rope_k = self.rope(range_k, token_positions)
+        else:
+            rope_q = range_q
+            rope_k = range_k
 
 
 
