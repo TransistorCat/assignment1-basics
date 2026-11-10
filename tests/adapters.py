@@ -16,6 +16,7 @@ from cs336_basics.Rope import RotaryPositionalEmbedding
 from cs336_basics.MHA import MultiHeadSelfAttention
 from cs336_basics.MHA import scaled_dot_product_attention
 from cs336_basics.MHA import softmax
+from cs336_basics.FFN import FFN
 
 def run_linear(
     d_in: int,
@@ -95,7 +96,13 @@ def run_swiglu(
     # swiglu.w1.weight.data = w1_weight
     # swiglu.w2.weight.data = w2_weight
     # swiglu.w3.weight.data = w3_weight
-    raise NotImplementedError
+    swiglu = FFN(d_model, d_ff)
+    swiglu.load_state_dict({
+        "w1.w": w1_weight,
+        "w2.w": w2_weight,
+        "w3.w": w3_weight
+    })
+    return swiglu(in_features)
 
 
 def run_scaled_dot_product_attention(
