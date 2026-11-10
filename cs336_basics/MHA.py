@@ -1,8 +1,9 @@
 
+from einops import rearrange
 import torch
 import torch.nn as nn
-from linear import Linear
-from Rope import RotaryPositionalEmbedding
+from .linear import Linear
+from .Rope import RotaryPositionalEmbedding
 
 def softmax(x: torch.Tensor, i: int) -> torch.Tensor:
     '''
@@ -41,6 +42,7 @@ def scaled_dot_product_attention(
     d_k = q.size(-1)
     scores = scores / torch.sqrt(torch.tensor(d_k, dtype=torch.float32))
 
+
     # 应用掩码
     if mask is not None:
         scores = scores.masked_fill(~mask, float('-inf'))
@@ -72,7 +74,8 @@ class MultiHeadSelfAttention(nn.Module):
         self.num_heads = num_heads
         # 定义线性层
         self.qkv_proj = Linear(d_model, 3 * d_model) # (batch_size, seq_len, d_model) -> (batch_size, seq_len, 3 * d_model)
-        self.rope = RotaryPositionalEmbedding(d_model // num_heads, max_seq_len, rope_theta)
+        self.out_proj = Linear(d_model, d_model)
+        self.rope = RotaryPositionalEmbedding(rope_theta, d_model // num_heads, max_seq_len)
 
 
     def forward(self, x: torch.Tensor, token_positions: torch.Tensor = None) -> torch.Tensor:
@@ -83,8 +86,30 @@ class MultiHeadSelfAttention(nn.Module):
         '''
 
         q_proj, k_proj, v_proj = torch.chunk(self.qkv_proj(x), 3, dim=-1) 
+        # 根据 self.num_heads 将 q_proj, k_proj, v_proj 重新排列为 (batch_size, num_heads, seq_len, d_k)
+        range_q = rearrange(q_proj, 'b s (h d) -> b h s d', h=self.num_heads)
+        range_k = rearrange(k_proj, 'b s (h d) -> b h s d', h=self.num_heads)
+        range_v = rearrange(v_proj, 'b s (h d) -> b h s d', h=self.num_heads)
 
-        return
+        # 计算 RoPE
+        if token_positions is None:
+            token_positions = torch.arange(x.size(1), device=x.device).unsqueeze(0).expand(x.size(0), -1)  # (batch_size, seq_len)
+        rope_q = self.rope(range_q, token_positions)
+        rope_k = self.rope(range_k, token_positions)
+
+
+
+        mask = torch.tril(
+                    torch.ones(x.size(1), x.size(1), dtype=torch.bool, device=x.device)
+                )
+        # 计算缩放点积注意力
+        attn_output = scaled_dot_product_attention(rope_q, rope_k, range_v,mask=mask)  # (batch_size, num_heads, seq_len, d_k)
+
+        range_attn_output = rearrange(attn_output, 'b h s d -> b s (h d)')  # (batch_size, seq_len, d_model)
+
+        out = self.out_proj(range_attn_output)  # (batch_size, seq_len, d_model)
+
+        return out
 
 if __name__ == "__main__":
     # 测试代码
